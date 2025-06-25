@@ -1,0 +1,18 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"strings"
+)
+
+func main() {
+	data := strings.TrimSpace("  hello  ")
+	fmt.Println(data)
+
+	var err error
+	if errors.Is(err, fs.ErrNotExist) {
+		fmt.Println("File does not exist")
+	}
+}

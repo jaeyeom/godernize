@@ -1,0 +1,20 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+)
+
+func main() {
+	var err error
+	if errors.Is(err, fs.ErrNotExist) {
+		fmt.Println("File does not exist")
+	}
+	if errors.Is(err, fs.ErrExist) {
+		fmt.Println("File exists")
+	}
+	if errors.Is(err, fs.ErrPermission) {
+		fmt.Println("Permission denied")
+	}
+}

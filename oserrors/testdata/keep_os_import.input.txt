@@ -1,0 +1,20 @@
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	file, err := os.Open("test.txt")
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("File does not exist")
+		}
+	}
+	defer file.Close()
+
+	// os package is still used for other purposes
+	info, _ := os.Stat("test.txt")
+	fmt.Println(info.Size())
+}
