@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/analysis/passes/buildssa"
 	"golang.org/x/tools/go/analysis/passes/inspect"
 	"golang.org/x/tools/go/ast/inspector"
 	"golang.org/x/tools/imports"
@@ -36,7 +37,7 @@ var Analyzer = &analysis.Analyzer{
 	Name:     "oserrors",
 	Doc:      Doc,
 	Run:      run,
-	Requires: []*analysis.Analyzer{inspect.Analyzer},
+	Requires: []*analysis.Analyzer{inspect.Analyzer, buildssa.Analyzer},
 }
 
 //nolint:gochecknoglobals // analyzer pattern
