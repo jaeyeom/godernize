@@ -87,7 +87,6 @@ linters:
     - wrapcheck
     - wsl
     - zerologlint
-
   settings:
     varnamelen:
       ignore-type-assert-ok: true
@@ -98,7 +97,16 @@ linters:
     mnd:
       ignored-numbers:
         - "2"
-
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - _test\.go
+      - examples_.*\.go
 formatters:
   enable:
     - gci
@@ -110,13 +118,3 @@ formatters:
         - default
         - prefix(github.com/jaeyeom/godernize)
 
-exclusions:
-  generated: lax
-  presets:
-    - comments
-    - common-false-positives
-    - legacy
-    - std-error-handling
-  paths:
-    - _test\.go
-    - examples_.*\.go
