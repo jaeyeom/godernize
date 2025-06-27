@@ -7,7 +7,6 @@ import (
 	"go/ast"
 	"go/format"
 	"go/token"
-	"go/types"
 	"strconv"
 
 	"golang.org/x/tools/go/analysis"
@@ -154,17 +153,8 @@ func isOsPackage(pass *analysis.Pass, expr ast.Expr) bool {
 	if !ok {
 		return false
 	}
-	// First try using TypesInfo if available (most reliable)
-	if pass.TypesInfo != nil && pass.TypesInfo.Uses != nil {
-		if obj := pass.TypesInfo.Uses[ident]; obj != nil {
-			if pkg, ok := obj.(*types.PkgName); ok {
-				return pkg.Imported().Path() == "os"
-			}
-		}
-	}
 
-	// Fallback: check if this looks like the os package based on imports
-	// This handles cases where TypesInfo might not be fully populated
+	// Simple approach: check if identifier is "os" and os package is imported
 	if ident.Name == "os" {
 		return isOsImported(pass, ident)
 	}
