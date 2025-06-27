@@ -11,7 +11,6 @@ import (
 	"strconv"
 
 	"golang.org/x/tools/go/analysis"
-	"golang.org/x/tools/go/analysis/passes/buildssa"
 	"golang.org/x/tools/go/analysis/passes/inspect"
 	"golang.org/x/tools/go/ast/inspector"
 	"golang.org/x/tools/imports"
@@ -36,8 +35,9 @@ const standardTabWidth = 8
 var Analyzer = &analysis.Analyzer{
 	Name:     "oserrors",
 	Doc:      Doc,
+	URL:      "https://pkg.go.dev/github.com/jaeyeom/godernize/oserrors",
 	Run:      run,
-	Requires: []*analysis.Analyzer{inspect.Analyzer, buildssa.Analyzer},
+	Requires: []*analysis.Analyzer{inspect.Analyzer},
 }
 
 //nolint:gochecknoglobals // analyzer pattern
@@ -150,10 +150,48 @@ type deprecatedCall struct {
 }
 
 func isOsPackage(pass *analysis.Pass, expr ast.Expr) bool {
-	if ident, ok := expr.(*ast.Ident); ok {
+	ident, ok := expr.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	// First try using TypesInfo if available (most reliable)
+	if pass.TypesInfo != nil && pass.TypesInfo.Uses != nil {
 		if obj := pass.TypesInfo.Uses[ident]; obj != nil {
 			if pkg, ok := obj.(*types.PkgName); ok {
 				return pkg.Imported().Path() == "os"
+			}
+		}
+	}
+
+	// Fallback: check if this looks like the os package based on imports
+	// This handles cases where TypesInfo might not be fully populated
+	if ident.Name == "os" {
+		return isOsImported(pass, ident)
+	}
+
+	return false
+}
+
+// isOsImported checks if the "os" package is imported in any of the analyzed files
+// and if the identifier could refer to it based on position and context.
+func isOsImported(pass *analysis.Pass, ident *ast.Ident) bool {
+	for _, file := range pass.Files {
+		// Check if this identifier is in this file
+		if ident.Pos() < file.Pos() || ident.Pos() > file.End() {
+			continue
+		}
+
+		// Check if os package is imported in this file
+		for _, imp := range file.Imports {
+			if imp.Path.Value == `"os"` {
+				// Check if there's no alias (meaning it uses the default "os" name)
+				if imp.Name == nil {
+					return true
+				}
+				// Check if it's explicitly named "os"
+				if imp.Name != nil && imp.Name.Name == "os" {
+					return true
+				}
 			}
 		}
 	}
