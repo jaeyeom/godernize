@@ -31,21 +31,21 @@ The `oserrors` analyzer reports usage of deprecated os error checking functions 
 
 The analyzer provides comprehensive fixes that:
 - Replace all deprecated function calls in a file
-- Add necessary imports (`errors`, `fs`)
-- Remove unused `os` import if no longer needed
-- Properly organize imports using `goimports`
+- (Not implemented) Add necessary imports (`errors`, `fs`)
+- (Not implemented) Remove unused `os` import if no longer needed
+- (Not implemented) Properly organize imports using `goimports`
 
 ### Ignoring checks
 
 You can ignore specific checks using Go comments with the `//godernize:ignore` directive:
 
 ```go
-//godernize:ignore oserrors
+//godernize:ignore=oserrors
 if os.IsNotExist(err) {
     // This check will be ignored
 }
 
-//godernize:ignore IsNotExist
+//godernize:ignore=IsNotExist
 if os.IsNotExist(err) {
     // This specific function check will be ignored
 }

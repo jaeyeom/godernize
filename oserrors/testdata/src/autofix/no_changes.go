@@ -1,4 +1,4 @@
-package main
+package autofix
 
 import (
 	"errors"
@@ -7,7 +7,9 @@ import (
 	"os"
 )
 
-func main() {
+var _ = noChanges
+
+func noChanges() {
 	_, err := os.Open("test.txt")
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

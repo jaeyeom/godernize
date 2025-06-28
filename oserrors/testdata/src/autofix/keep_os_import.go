@@ -1,14 +1,16 @@
-package main
+package autofix
 
 import (
 	"fmt"
 	"os"
 )
 
-func main() {
+var _ = keepOSImport
+
+func keepOSImport() {
 	file, err := os.Open("test.txt")
 	if err != nil {
-		if os.IsNotExist(err) {
+		if os.IsNotExist(err) { // want `os.IsNotExist is deprecated, use errors.Is\(err, fs.ErrNotExist\) instead`
 			fmt.Println("File does not exist")
 		}
 	}

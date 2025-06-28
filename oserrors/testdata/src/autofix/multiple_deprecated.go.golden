@@ -1,0 +1,21 @@
+package autofix
+
+import (
+	"fmt"
+	"os"
+)
+
+var _ = multipleDeprecated
+
+func multipleDeprecated() {
+	var err error
+	if errors.Is(err, fs.ErrNotExist) { // want `os.IsNotExist is deprecated, use errors.Is\(err, fs.ErrNotExist\) instead`
+		fmt.Println("File does not exist")
+	}
+	if errors.Is(err, fs.ErrExist) { // want `os.IsExist is deprecated, use errors.Is\(err, fs.ErrExist\) instead`
+		fmt.Println("File exists")
+	}
+	if errors.Is(err, fs.ErrPermission) { // want `os.IsPermission is deprecated, use errors.Is\(err, fs.ErrPermission\) instead`
+		fmt.Println("Permission denied")
+	}
+}

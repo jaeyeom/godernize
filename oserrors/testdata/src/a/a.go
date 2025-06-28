@@ -8,7 +8,7 @@ import (
 func testIsNotExist() {
 	file, err := os.Open("nonexistent.txt")
 	if err != nil {
-		if os.IsNotExist(err) { // want "Replace multiple deprecated os error functions with modern errors.Is\\(\\) patterns"
+		if os.IsNotExist(err) { // want "os.IsNotExist is deprecated, use errors.Is\\(err, fs.ErrNotExist\\) instead"
 			fmt.Println("File does not exist")
 		}
 	}
@@ -18,7 +18,7 @@ func testIsNotExist() {
 func testIsExist() {
 	err := os.Mkdir("test", 0755)
 	if err != nil {
-		if os.IsExist(err) {
+		if os.IsExist(err) { // want "os.IsExist is deprecated, use errors.Is\\(err, fs.ErrExist\\) instead"
 			fmt.Println("Directory already exists")
 		}
 	}
@@ -27,7 +27,7 @@ func testIsExist() {
 func testIsPermission() {
 	file, err := os.Open("/root/secret.txt")
 	if err != nil {
-		if os.IsPermission(err) {
+		if os.IsPermission(err) { // want "os.IsPermission is deprecated, use errors.Is\\(err, fs.ErrPermission\\) instead"
 			fmt.Println("Permission denied")
 		}
 	}

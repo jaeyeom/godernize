@@ -1,0 +1,15 @@
+package autofix
+
+import (
+	"fmt"
+	"os"
+)
+
+var _ = singleDeprecated
+
+func singleDeprecated() {
+	var err error
+	if errors.Is(err, fs.ErrNotExist) { // want `os.IsNotExist is deprecated, use errors.Is\(err, fs.ErrNotExist\) instead`
+		fmt.Println("File does not exist")
+	}
+}

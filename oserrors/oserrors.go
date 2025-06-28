@@ -7,12 +7,12 @@ import (
 	"go/ast"
 	"go/format"
 	"go/token"
+	"path/filepath"
 	"strconv"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
 	"golang.org/x/tools/go/ast/inspector"
-	"golang.org/x/tools/imports"
 
 	"github.com/jaeyeom/godernize/internal/directive"
 )
@@ -26,455 +26,135 @@ replacing them with modern errors.Is() patterns:
 - os.IsExist(err) -> errors.Is(err, fs.ErrExist)
 - os.IsPermission(err) -> errors.Is(err, fs.ErrPermission)`
 
-const standardTabWidth = 8
-
 // Analyzer is the main analyzer for deprecated os error functions.
 //
 //nolint:gochecknoglobals // analyzer pattern requires global variable
-var Analyzer = &analysis.Analyzer{
-	Name:     "oserrors",
-	Doc:      Doc,
-	URL:      "https://pkg.go.dev/github.com/jaeyeom/godernize/oserrors",
-	Run:      run,
-	Requires: []*analysis.Analyzer{inspect.Analyzer},
+var Analyzer = newAnalyzer(map[string]string{
+	"IsNotExist":   "ErrNotExist",
+	"IsExist":      "ErrExist",
+	"IsPermission": "ErrPermission",
+})
+
+func newAnalyzer(osFuncsToFsErr map[string]string) *analysis.Analyzer {
+	runner := runner{osFuncsToFsErr: osFuncsToFsErr}
+
+	analyzer := &analysis.Analyzer{
+		Name:     "oserrors",
+		Doc:      Doc,
+		URL:      "https://pkg.go.dev/github.com/jaeyeom/godernize/oserrors",
+		Run:      runner.run,
+		Requires: []*analysis.Analyzer{inspect.Analyzer},
+	}
+
+	return analyzer
 }
 
-//nolint:gochecknoglobals // analyzer pattern
-var deprecatedFunctions = map[string]string{
-	"IsNotExist":   "errors.Is(err, fs.ErrNotExist)",
-	"IsExist":      "errors.Is(err, fs.ErrExist)",
-	"IsPermission": "errors.Is(err, fs.ErrPermission)",
+type runner struct {
+	osFuncsToFsErr map[string]string
 }
 
-type ignoreContext struct {
-	file               *ast.File
-	hasSpecificIgnores bool
-}
+//nolint:nilnil // analyzer pattern
+func (r *runner) run(pass *analysis.Pass) (any, error) {
+	if pass == nil {
+		return nil, nil
+	}
 
-func run(pass *analysis.Pass) (interface{}, error) {
 	inspect, ok := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
-	if !ok {
-		return nil, fmt.Errorf("failed to get inspector")
+	if !ok || inspect == nil {
+		return nil, nil // Don't fail, just skip analysis
 	}
 
 	nodeFilter := []ast.Node{
 		(*ast.CallExpr)(nil),
 	}
 
-	// Group deprecated calls by ignore context
-	contextCallsMap := make(map[ignoreContext][]*deprecatedCall)
+	fileMap := buildFileMap(pass)
 
 	inspect.Preorder(nodeFilter, func(n ast.Node) {
 		call, ok := n.(*ast.CallExpr)
-		if !ok {
+		if !ok || call == nil {
 			return
 		}
 
-		processCallExpr(pass, call, contextCallsMap)
-	})
+		pos := pass.Fset.Position(call.Pos())
+		filename := pos.Filename
+		file := fileMap[filename]
 
-	// Process each context and create appropriate fixes
-	for context, calls := range contextCallsMap {
-		if len(calls) > 0 {
-			// Save the position before creating the fix, as the fix might modify the AST
-			firstCallPos := calls[0].call.Pos()
-
-			if context.hasSpecificIgnores {
-				// For contexts with specific ignores, report individual diagnostics
-				for _, call := range calls {
-					pass.Report(analysis.Diagnostic{
-						Pos:     call.call.Pos(),
-						Message: "os." + call.fun.Sel.Name + " is deprecated, use " + call.replacement + " instead",
-					})
-				}
-			} else {
-				// For contexts without specific ignores, create comprehensive fix
-				suggestedFix := createComprehensiveFix(pass, context.file, calls)
-				if suggestedFix != nil {
-					pass.Report(analysis.Diagnostic{
-						Pos:            firstCallPos,
-						Message:        createSummaryMessage(calls),
-						SuggestedFixes: []analysis.SuggestedFix{*suggestedFix},
-					})
-				}
-			}
+		if diagnostic := r.diagnoseCallExpr(file, call); diagnostic != nil {
+			pass.Report(*diagnostic)
 		}
-	}
-
-	return nil, nil //nolint:nilnil // analyzer pattern
-}
-
-func processCallExpr(pass *analysis.Pass, call *ast.CallExpr, contextCallsMap map[ignoreContext][]*deprecatedCall) {
-	fun, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return
-	}
-
-	if !isOsPackage(pass, fun.X) {
-		return
-	}
-
-	replacement, deprecated := deprecatedFunctions[fun.Sel.Name]
-	if !deprecated {
-		return
-	}
-
-	// Check for directive to ignore this check
-	if shouldIgnore(pass, call, fun.Sel.Name) {
-		return
-	}
-
-	file := getFileForPos(pass, call.Pos())
-	if file == nil {
-		return
-	}
-
-	// Determine if this call is in a context with specific ignore directives
-	hasSpecificIgnores := callHasSpecificIgnoreDirective(pass, call)
-	context := ignoreContext{
-		file:               file,
-		hasSpecificIgnores: hasSpecificIgnores,
-	}
-	contextCallsMap[context] = append(contextCallsMap[context], &deprecatedCall{
-		call:        call,
-		fun:         fun,
-		replacement: replacement,
 	})
+
+	return nil, nil
 }
 
-type deprecatedCall struct {
-	call        *ast.CallExpr
-	fun         *ast.SelectorExpr
-	replacement string
+func buildFileMap(pass *analysis.Pass) map[string]*ast.File {
+	fileMap := make(map[string]*ast.File)
+
+	for _, file := range pass.Files {
+		pos := pass.Fset.Position(file.Pos())
+		fileMap[pos.Filename] = file
+	}
+
+	return fileMap
 }
 
-func isOsPackage(pass *analysis.Pass, expr ast.Expr) bool {
+func (r *runner) diagnoseCallExpr(file *ast.File, call *ast.CallExpr) *analysis.Diagnostic {
+	if call == nil || call.Fun == nil {
+		return nil
+	}
+
+	fName, fsErr := r.findMapping(file, call)
+	if fsErr == "" {
+		return nil // Not a deprecated os function
+	}
+
+	if shouldIgnore(file, call, fName) {
+		return nil
+	}
+
+	return createDiagnostic(file, call, fName, fsErr)
+}
+
+func (r *runner) findMapping(file *ast.File, call *ast.CallExpr) (fName, fsErr string) {
+	fun, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || fun == nil || fun.X == nil || fun.Sel == nil || !isPkg(file, fun.X, "os") {
+		return "", ""
+	}
+
+	return fun.Sel.Name, r.osFuncsToFsErr[fun.Sel.Name]
+}
+
+func isPkg(file *ast.File, expr ast.Expr, path string) bool {
+	if expr == nil {
+		return false
+	}
+
 	ident, ok := expr.(*ast.Ident)
-	if !ok {
+	if !ok || ident == nil {
 		return false
 	}
 
 	// Simple approach: check if identifier is "os" and os package is imported
-	if ident.Name == "os" {
-		return isOsImported(pass, ident)
-	}
-
-	return false
+	return ident.Name == importedIdentifier(file, ident, path)
 }
 
-// isOsImported checks if the "os" package is imported in any of the analyzed files
-// and if the identifier could refer to it based on position and context.
-func isOsImported(pass *analysis.Pass, ident *ast.Ident) bool {
-	for _, file := range pass.Files {
-		// Check if this identifier is in this file
-		if ident.Pos() < file.Pos() || ident.Pos() > file.End() {
-			continue
-		}
-
-		// Check if os package is imported in this file
-		for _, imp := range file.Imports {
-			if imp.Path.Value == `"os"` {
-				// Check if there's no alias (meaning it uses the default "os" name)
-				if imp.Name == nil {
-					return true
-				}
-				// Check if it's explicitly named "os"
-				if imp.Name != nil && imp.Name.Name == "os" {
-					return true
-				}
-			}
-		}
+func importedIdentifier(file *ast.File, ident *ast.Ident, path string) string {
+	if file == nil || ident == nil || !ident.Pos().IsValid() {
+		return ""
 	}
 
-	return false
+	// Check if this identifier is in this file
+	if !file.Pos().IsValid() || !file.End().IsValid() ||
+		ident.Pos() < file.Pos() || ident.Pos() > file.End() {
+		return ""
+	}
+
+	return findAliasName(file, path)
 }
 
-func createSummaryMessage(calls []*deprecatedCall) string {
-	if len(calls) == 1 {
-		return "os." + calls[0].fun.Sel.Name + " is deprecated, use " + calls[0].replacement + " instead"
-	}
-
-	return "Replace multiple deprecated os error functions with modern errors.Is() patterns"
-}
-
-func createComprehensiveFix(pass *analysis.Pass, file *ast.File, calls []*deprecatedCall) *analysis.SuggestedFix {
-	// Create a copy of the file for modification
-	fileCopy := copyASTFile(file)
-
-	// Replace all deprecated function calls in the copied AST
-	for _, call := range calls {
-		if !replaceFunctionCall(fileCopy, call.call, call.replacement) {
-			return nil // Failed to replace
-		}
-	}
-
-	// Check if os import will become unused after all fixes
-	if willAllOsUsageBeReplaced(pass, file, calls) {
-		removeUnusedImport(fileCopy, "os")
-	}
-
-	// Use goimports to properly organize imports and add missing ones
-	newContent, err := formatFileWithImports(pass, fileCopy)
-	if err != nil {
-		return nil
-	}
-
-	// Create a single TextEdit that replaces the entire file
-	return &analysis.SuggestedFix{
-		Message: "Replace deprecated os error functions and organize imports",
-		TextEdits: []analysis.TextEdit{{
-			Pos:     file.Pos(),
-			End:     file.End(),
-			NewText: newContent,
-		}},
-	}
-}
-
-func getFileForPos(pass *analysis.Pass, pos token.Pos) *ast.File {
-	for _, file := range pass.Files {
-		if file.Pos() <= pos && pos <= file.End() {
-			return file
-		}
-	}
-
-	return nil
-}
-
-func copyASTFile(file *ast.File) *ast.File {
-	// Create a deep copy of the AST file
-	// This is a simplified copy - in practice, you might want a more robust deep copy
-	newFile := &ast.File{
-		Doc:        file.Doc,
-		Package:    file.Package,
-		Name:       file.Name,
-		Decls:      make([]ast.Decl, len(file.Decls)),
-		Scope:      file.Scope,
-		Imports:    make([]*ast.ImportSpec, len(file.Imports)),
-		Unresolved: file.Unresolved,
-		Comments:   file.Comments,
-	}
-
-	copy(newFile.Decls, file.Decls)
-	copy(newFile.Imports, file.Imports)
-
-	return newFile
-}
-
-func replaceFunctionCall(file *ast.File, originalCall *ast.CallExpr, _ string) bool {
-	found := false
-
-	ast.Inspect(file, func(n ast.Node) bool {
-		if call, ok := n.(*ast.CallExpr); ok {
-			if call.Pos() == originalCall.Pos() && call.End() == originalCall.End() {
-				// Replace the call with a simple identifier for the replacement
-				// This is a simplified approach - parsing the replacement properly would be better
-				if fun, ok := call.Fun.(*ast.SelectorExpr); ok {
-					// For our specific case, we know the replacement pattern
-					// Replace os.IsXxx(err) with errors.Is(err, fs.ErrXxx)
-					newCall := &ast.CallExpr{
-						Fun: &ast.SelectorExpr{
-							X:   &ast.Ident{Name: "errors"},
-							Sel: &ast.Ident{Name: "Is"},
-						},
-						Args: []ast.Expr{
-							call.Args[0], // Keep the original err argument
-							createFsErrorExpr(fun.Sel.Name),
-						},
-					}
-					*call = *newCall
-					found = true
-
-					return false
-				}
-			}
-		}
-
-		return true
-	})
-
-	return found
-}
-
-func createFsErrorExpr(funcName string) ast.Expr {
-	var errName string
-
-	switch funcName {
-	case "IsNotExist":
-		errName = "ErrNotExist"
-	case "IsExist":
-		errName = "ErrExist"
-	case "IsPermission":
-		errName = "ErrPermission"
-	default:
-		errName = "ErrNotExist" // fallback
-	}
-
-	return &ast.SelectorExpr{
-		X:   &ast.Ident{Name: "fs"},
-		Sel: &ast.Ident{Name: errName},
-	}
-}
-
-func willAllOsUsageBeReplaced(pass *analysis.Pass, file *ast.File, calls []*deprecatedCall) bool {
-	// Count all os package usages in the file
-	osUsages := 0
-	deprecatedUsages := 0
-	callsToReplace := len(calls)
-
-	ast.Inspect(file, func(n ast.Node) bool {
-		countOsUsage(pass, n, &osUsages, &deprecatedUsages)
-
-		return true
-	})
-
-	// If all os usages are deprecated functions and we're replacing all of them, the import will be unused
-	return osUsages > 0 && osUsages == deprecatedUsages && deprecatedUsages == callsToReplace
-}
-
-func countOsUsage(pass *analysis.Pass, n ast.Node, osUsages, deprecatedUsages *int) {
-	call, ok := n.(*ast.CallExpr)
-	if !ok {
-		return
-	}
-
-	fun, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return
-	}
-
-	if !isOsPackage(pass, fun.X) {
-		return
-	}
-
-	*osUsages++
-
-	if _, isDeprecated := deprecatedFunctions[fun.Sel.Name]; isDeprecated {
-		*deprecatedUsages++
-	}
-}
-
-func removeUnusedImport(file *ast.File, importPath string) {
-	for i, imp := range file.Imports {
-		path, _ := strconv.Unquote(imp.Path.Value)
-		if path == importPath {
-			// Remove the import from the slice
-			file.Imports = append(file.Imports[:i], file.Imports[i+1:]...)
-			removeImportFromDeclarations(file, imp)
-
-			return
-		}
-	}
-}
-
-func removeImportFromDeclarations(file *ast.File, imp *ast.ImportSpec) {
-	for declIdx, decl := range file.Decls {
-		genDecl, ok := decl.(*ast.GenDecl)
-		if !ok || genDecl.Tok != token.IMPORT {
-			continue
-		}
-
-		for k, spec := range genDecl.Specs {
-			if spec == imp {
-				genDecl.Specs = append(genDecl.Specs[:k], genDecl.Specs[k+1:]...)
-				if len(genDecl.Specs) == 0 {
-					// Remove the entire import declaration if empty
-					file.Decls = append(file.Decls[:declIdx], file.Decls[declIdx+1:]...)
-				}
-
-				return
-			}
-		}
-	}
-}
-
-func formatFileWithImports(pass *analysis.Pass, file *ast.File) ([]byte, error) {
-	// First, format the AST to get the source code
-	var buf bytes.Buffer
-
-	tokenFileSet := pass.Fset
-
-	// Create a buffer to write the formatted code
-	err := format.Node(&buf, tokenFileSet, file)
-	if err != nil {
-		return nil, fmt.Errorf("failed to format AST node: %w", err)
-	}
-
-	// Use goimports to organize imports properly
-	options := &imports.Options{
-		Comments:  true,
-		TabIndent: true,
-		TabWidth:  standardTabWidth,
-		Fragment:  false,
-	}
-
-	result, err := imports.Process("", buf.Bytes(), options)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process imports: %w", err)
-	}
-
-	return result, nil
-}
-
-func callHasSpecificIgnoreDirective(pass *analysis.Pass, call *ast.CallExpr) bool {
-	// Check if this call is in a function or context that has specific ignore directives
-	// (not just general //godernize:ignore, but specific ones like //godernize:ignore=IsNotExist)
-	for _, file := range pass.Files {
-		if hasSpecificFunctionIgnore(file, call) {
-			return true
-		}
-
-		if hasSpecificCommentIgnore(file, call) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func hasSpecificFunctionIgnore(file *ast.File, call *ast.CallExpr) bool {
-	for _, decl := range file.Decls {
-		funcDecl, ok := decl.(*ast.FuncDecl)
-		if !ok {
-			continue
-		}
-
-		if call.Pos() >= funcDecl.Pos() && call.End() <= funcDecl.End() {
-			ignore := directive.ParseIgnore(funcDecl.Doc)
-			if ignore != nil && ignore.HasSpecificRules() {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-func hasSpecificCommentIgnore(file *ast.File, call *ast.CallExpr) bool {
-	for _, cg := range file.Comments {
-		if cg.End() <= call.Pos() && call.Pos()-cg.End() <= 200 {
-			ignore := directive.ParseIgnore(cg)
-			if ignore != nil && ignore.HasSpecificRules() {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-func shouldIgnore(pass *analysis.Pass, call *ast.CallExpr, funcName string) bool {
-	// Check all files for comments and function docs
-	for _, file := range pass.Files {
-		if shouldIgnoreInFunction(file, call, funcName) {
-			return true
-		}
-
-		if shouldIgnoreFromComment(file, call, funcName) {
-			return true
-		}
-	}
-
-	return false
+func shouldIgnore(file *ast.File, call *ast.CallExpr, funcName string) bool {
+	return shouldIgnoreInFunction(file, call, funcName) || shouldIgnoreFromComment(file, call, funcName)
 }
 
 func shouldIgnoreInFunction(file *ast.File, call *ast.CallExpr, funcName string) bool {
@@ -507,4 +187,97 @@ func shouldIgnoreFromComment(file *ast.File, call *ast.CallExpr, funcName string
 	}
 
 	return false
+}
+
+func createDiagnostic(file *ast.File, call *ast.CallExpr, fName, fsErr string) *analysis.Diagnostic {
+	if call == nil || !call.Pos().IsValid() || !call.End().IsValid() {
+		return nil
+	}
+
+	// Extract the original argument from the call
+	if len(call.Args) != 1 {
+		return nil // Only handle single-argument calls
+	}
+
+	// Get the argument as text
+	argText := formatASTNode(call.Args[0])
+	if argText == "" {
+		argText = "err" // fallback
+	}
+
+	replacementText := buildReplacementText(file, argText, fsErr)
+	if replacementText == "" {
+		return nil // No valid replacement found
+	}
+
+	return &analysis.Diagnostic{
+		Pos:     call.Pos(),
+		Message: fmt.Sprintf("os.%s is deprecated, use %s instead", fName, replacementText),
+		SuggestedFixes: []analysis.SuggestedFix{{
+			Message: "Replace with " + replacementText,
+			TextEdits: []analysis.TextEdit{{
+				Pos:     call.Pos(),
+				End:     call.End(),
+				NewText: []byte(replacementText),
+			}},
+		}},
+	}
+}
+
+func formatASTNode(node ast.Node) string {
+	if node == nil {
+		return ""
+	}
+
+	fset := token.NewFileSet()
+
+	var buf bytes.Buffer
+
+	err := format.Node(&buf, fset, node)
+	if err != nil {
+		return ""
+	}
+
+	return buf.String()
+}
+
+func buildReplacementText(file *ast.File, argText, fsErr string) string {
+	errorsPackage := findAliasName(file, "errors")
+	if errorsPackage == "" {
+		errorsPackage = "errors" // new import
+	}
+
+	fsPackage := findAliasName(file, "io/fs")
+	if fsPackage == "" {
+		fsPackage = "fs" // new import
+	}
+
+	return fmt.Sprintf("%s.Is(%s, %s.%s)", errorsPackage, argText, fsPackage, fsErr)
+}
+
+func findAliasName(file *ast.File, path string) string {
+	for _, imp := range file.Imports {
+		if imp == nil || imp.Path == nil {
+			continue
+		}
+
+		if imp.Path.Value == strconv.Quote(path) {
+			aliasName := aliasNameOf(imp)
+			if aliasName == "" {
+				return filepath.Base(path)
+			}
+
+			return aliasName
+		}
+	}
+
+	return ""
+}
+
+func aliasNameOf(imp *ast.ImportSpec) string {
+	if imp.Name == nil {
+		return ""
+	}
+
+	return imp.Name.Name
 }

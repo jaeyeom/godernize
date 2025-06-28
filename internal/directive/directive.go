@@ -15,11 +15,12 @@ import (
 //
 // or consist of name
 //
-//	//godernize:ignore=oserrnotexist
+//	//godernize:ignore=oserrors
+//	//godernize:ignore=IsNotExist
 //
 // or multiple names
 //
-//	//godernize:ignore=oserrnotexist,oserrexist
+//	//godernize:ignore=IsNotExist,IsExist
 type Ignore struct {
 	Names []string
 }
