@@ -585,6 +585,7 @@ func shouldIgnore(file *ast.File, node ast.Node, analyzerName string) bool {
 	if file == nil {
 		return false
 	}
+
 	return shouldIgnoreInFunction(file, node, analyzerName) || shouldIgnoreFromComment(file, node, analyzerName)
 }
 
@@ -592,6 +593,7 @@ func shouldIgnoreInFunction(file *ast.File, node ast.Node, analyzerName string) 
 	if file == nil {
 		return false
 	}
+
 	for _, decl := range file.Decls {
 		funcDecl, ok := decl.(*ast.FuncDecl)
 		if !ok {
@@ -613,6 +615,7 @@ func shouldIgnoreFromComment(file *ast.File, node ast.Node, analyzerName string)
 	if file == nil {
 		return false
 	}
+
 	for _, cg := range file.Comments {
 		// Check if comment appears before the node and is reasonably close
 		if cg.End() <= node.Pos() && node.Pos()-cg.End() <= 200 {
