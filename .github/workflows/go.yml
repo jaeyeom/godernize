@@ -16,8 +16,8 @@ jobs:
       matrix:
         go-version: [oldstable, stable]
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v6
       with:
         go-version: ${{ matrix.go-version }}
     - name: Test
@@ -26,8 +26,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v6
       with:
         go-version: oldstable
     - uses: golangci/golangci-lint-action@v9
