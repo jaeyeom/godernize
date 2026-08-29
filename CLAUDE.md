@@ -50,7 +50,7 @@ Placement: function doc comment, or a line comment ending within **200 bytes** b
 
 ## Gotchas
 
-- **oserrors fixes are text-only.** `SuggestedFix` replaces the call expression but does not add `errors`/`io/fs` imports or prune unused `os` imports. Golden files in `oserrors/testdata/src/autofix/` reflect this — do not expect import rewriting until implemented.
+- **oserrors fixes are text-only.** `SuggestedFix` replaces the call expression but does not add `errors`/`io/fs` imports. Newer `analysistest` prunes unused `os` imports after applying fixes; goldens in `oserrors/testdata/src/autofix/` reflect that. Do not expect the analyzer itself to rewrite imports until implemented.
 - **ctxnil type matching is strict.** Only `context.Context` from package `context` is matched; custom context interfaces or wrappers are not.
 - **ctxnil if-statement fixes use placeholder formatting.** `formatStmt` returns stub text (`{ /* statements */ }`), not full `go/format` output — expanding fix quality requires improving those helpers.
 - **Duplicate ignore helpers.** `shouldIgnore` / `shouldIgnoreInFunction` / `shouldIgnoreFromComment` are copied per analyzer today; follow the existing pattern when adding analyzers until shared helpers are extracted.
