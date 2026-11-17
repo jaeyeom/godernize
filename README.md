@@ -20,6 +20,27 @@ Run the linter:
 godernizecheck ./...
 ```
 
+## Configuration
+
+Place `.godernize.yml` next to `go.mod`. The tools walk upward from the working directory and read the file beside the nearest `go.mod`. When that file is absent, every analyzer flag keeps its built-in default.
+
+```yaml
+version: 1
+
+# Each analyzer name maps to that analyzer's flags.
+# A list is joined with commas and passed as one flag value.
+ctxnil: {}
+oserrors: {}
+```
+
+`version` is the integer `1`. A flag value is a string, boolean, number, or list of those values. Booleans become `true` or `false`, and numbers become decimal strings.
+
+A command-line flag overrides the file. For a flag named `allowlist` on an analyzer named `example`, `godernizecheck -example.allowlist=errors.New` wins over the file. The standalone binaries use the flag's own name, for example `-allowlist=errors.New`.
+
+`godernizecheck` rejects an unknown analyzer name and an unknown flag. `oserrorsgodernize` and `ctxnilgodernize` apply only their own section, so one file configures the whole suite.
+
+`//godernize:ignore` still skips a single declaration. `oserrors` and `ctxnil` currently define no flags.
+
 ## Analyzers
 
 ### oserrors
